@@ -1,0 +1,114 @@
+# ################################
+# Model: ConvTasnet for music separation
+# Data : MUSDB18
+# Author: Loic Prenevost
+# ################################
+
+# Speechbrain Parameters
+seed: 1234
+__set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
+experiment_name: MusDB-ConvTasnet
+output_folder: "/content/drive/MyDrive/Speechbrain/results"
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+musdb_raw_path: !PLACEHOLDER
+musdb_path: !PLACEHOLDER
+
+# Training settings
+epochs: 35
+batch: 1
+sequence_length: 4
+audio_channels: 2
+num_instruments: 4
+sample_rate: 44100
+lr: 0.0003
+device: "cuda"
+test_only: False
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <epochs>
+
+# Encoder parameters
+N_encoder_out: 256
+out_channels: 256
+kernel_size: 20
+kernel_stride: 10
+
+# Model
+convtasnet: !new:tasnet.ConvTasNet
+    audio_channels: 2
+    X: 8
+
+# Model
+Encoder: !new:speechbrain.lobes.models.dual_path.Encoder
+    kernel_size: !ref <kernel_size>
+    in_channels: !ref <audio_channels>
+    out_channels: !ref <N_encoder_out>
+
+
+intra: !new:speechbrain.lobes.models.dual_path.SBRNNBlock
+    num_layers: 1
+    input_size: !ref <out_channels>
+    hidden_channels: !ref <out_channels>
+    dropout: 0
+    bidirectional: True
+
+inter: !new:speechbrain.lobes.models.dual_path.SBRNNBlock
+    num_layers: 1
+    input_size: !ref <out_channels>
+    hidden_channels: !ref <out_channels>
+    dropout: 0
+    bidirectional: True
+
+MaskNet: !new:speechbrain.lobes.models.conv_tasnet.MaskNet
+    N: 256
+    B: 256
+    H: 512
+    P: 3
+    X: 8
+    R: 4
+    C: !ref <num_instruments>
+    norm_type: 'gLN'
+    causal: False
+    mask_nonlinear: 'relu'
+
+Decoder: !new:speechbrain.lobes.models.dual_path.Decoder
+    in_channels: !ref <N_encoder_out>
+    out_channels: 1
+    kernel_size: !ref <kernel_size>
+    stride: !ref <kernel_stride>
+    bias: False
+
+modules:
+    encoder: !ref <Encoder>
+    decoder: !ref <Decoder>
+    masknet: !ref <MaskNet>
+
+# Optimizer
+optimizer: !name:torch.optim.Adam
+    lr: !ref <lr>
+    weight_decay: 0
+
+# Scheduler
+lr_scheduler: !new:speechbrain.nnet.schedulers.ReduceLROnPlateau
+    factor: 0.5
+    patience: 2
+    dont_halve_until_epoch: 65
+
+# Loss
+loss: !name:speechbrain.nnet.losses.cal_si_snr
+loss_upper_lim: 999999
+clip_grad_norm: 5
+
+# Logging & Saving
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <save_folder>
+    recoverables:
+        encoder: !ref <Encoder>
+        decoder: !ref <Decoder>
+        masknet: !ref <MaskNet>
+        counter: !ref <epoch_counter>
+        lr_scheduler: !ref <lr_scheduler>
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
